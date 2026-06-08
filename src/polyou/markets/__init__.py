@@ -1,0 +1,1 @@
+from .polymarket_crypto_resolver import resolve_crypto_contract

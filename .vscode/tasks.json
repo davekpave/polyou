@@ -1,0 +1,154 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run Polyou Bot",
+            "type": "shell",
+            "command": ".venv/Scripts/python.exe src/run_polyou_bot.py",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PYTHONPATH": "src"
+                }
+            },
+            "isBackground": true,
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
+        },
+        {
+            "label": "Run all pytest tests",
+            "type": "shell",
+            "command": "pytest",
+            "group": "test"
+        },
+        {
+            "label": "Run pytest on all tests",
+            "type": "shell",
+            "command": "pytest",
+            "args": [],
+            "problemMatcher": [
+                "$pytest"
+            ],
+            "group": "test"
+        },
+        {
+            "label": "Run pytest on all tests",
+            "type": "shell",
+            "command": "pytest",
+            "args": [],
+            "problemMatcher": [
+                "$pytest"
+            ],
+            "group": "test"
+        },
+        {
+            "label": "Run pytest on all tests (ignore type errors)",
+            "type": "shell",
+            "command": "pytest --disable-warnings",
+            "args": [],
+            "problemMatcher": [
+                "$pytest"
+            ],
+            "group": "test"
+        },
+        {
+            "label": "Run pytest with verbose output",
+            "type": "shell",
+            "command": "pytest -v",
+            "args": [],
+            "problemMatcher": [
+                "$pytest"
+            ],
+            "group": "test"
+        },
+        {
+            "label": "Run pytest on test_execution.py",
+            "type": "shell",
+            "command": "pytest tests/test_execution.py -v",
+            "args": [],
+            "problemMatcher": [
+                "$pytest"
+            ],
+            "group": "test"
+        },
+        {
+            "label": "Inspect CLOB top-of-book (script)",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/bin/python scripts/inspect_clob.py",
+            "isBackground": false,
+            "problemMatcher": [],
+            "group": "test"
+        },
+        {
+            "label": "Diagnose selected current market",
+            "type": "shell",
+            "command": "PYTHONPATH=src:. ${workspaceFolder}/.venv/bin/python scripts/diagnose_current_updown.py",
+            "isBackground": false,
+            "problemMatcher": []
+        },
+        {
+            "label": "Probe CLOB markets endpoint",
+            "type": "shell",
+            "command": "curl -sS \"https://clob.polymarket.com/markets\" | head -c 400",
+            "isBackground": false,
+            "problemMatcher": []
+        },
+        {
+            "label": "Probe CLOB markets with params",
+            "type": "shell",
+            "command": "curl -sS \"https://clob.polymarket.com/markets?closed=false&active=true&limit=5&offset=0\" | head -c 800",
+            "isBackground": false,
+            "problemMatcher": []
+        },
+        {
+            "label": "Check CLOB markets offset 0",
+            "type": "shell",
+            "command": "curl -sS \"https://clob.polymarket.com/markets?limit=1&offset=0\" | .venv/bin/python - <<'PY'\nimport sys, json\nj=json.load(sys.stdin)\nprint(j['data'][0].get('market_slug'))\nPY",
+            "isBackground": false,
+            "problemMatcher": []
+        },
+        {
+            "label": "Check CLOB markets offset 0 (slug)",
+            "type": "shell",
+            "command": "curl -sS \"https://clob.polymarket.com/markets?limit=1&offset=0\" | ${workspaceFolder}/.venv/bin/python -c \"import sys,json; j=json.load(sys.stdin); print(j['data'][0].get('market_slug'))\"",
+            "isBackground": false,
+            "problemMatcher": []
+        },
+        {
+            "label": "Check CLOB markets offset 1 (slug)",
+            "type": "shell",
+            "command": "curl -sS \"https://clob.polymarket.com/markets?limit=1&offset=1\" | ${workspaceFolder}/.venv/bin/python -c \"import sys,json; j=json.load(sys.stdin); print(j['data'][0].get('market_slug'))\"",
+            "isBackground": false,
+            "problemMatcher": []
+        },
+        {
+            "label": "Inspect CLOB markets response keys",
+            "type": "shell",
+            "command": "curl -sS \"https://clob.polymarket.com/markets\" | ${workspaceFolder}/.venv/bin/python -c \"import sys,json; j=json.load(sys.stdin); print(j.keys()); print('len',len(j.get('data',[]))); print('cursor', j.get('next_cursor') or j.get('cursor') or j.get('nextCursor'))\"",
+            "isBackground": false,
+            "problemMatcher": []
+        },
+        {
+            "label": "Find Bitcoin Up/Down on CLOB",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/bin/python scripts/find_bitcoin_updown_clob.py",
+            "isBackground": false,
+            "problemMatcher": []
+        },
+        {
+            "label": "Find Bitcoin Up/Down on CLOB (to file)",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/bin/python scripts/find_bitcoin_updown_clob.py > logs/find_updown_clob.txt 2>&1 && echo WROTE",
+            "isBackground": false,
+            "problemMatcher": []
+        }
+    ]
+}

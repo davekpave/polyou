@@ -1,0 +1,17 @@
+# Core dependencies (pinned for reproducibility)
+requests==2.32.5
+colorama==0.4.6
+websocket-client==1.9.0
+python-dotenv==1.2.1
+py-clob-client-v2==1.0.0
+httpx==0.28.1
+tzdata  # Required for timezone support on Windows
+
+# Required imports in execution_client.py but not yet in original requirements
+tenacity>=8.0.0
+
+# Testing
+pytest==9.0.2
+
+# Note: web3, eth-account, pyyaml are transitive dependencies via py-clob-client
+# and don't need to be explicitly listed here
