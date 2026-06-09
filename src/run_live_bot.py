@@ -26,6 +26,10 @@ import json as _json
 from dotenv import load_dotenv
 load_dotenv()
 
+import sys
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 # Force separate log files before any imports that read env
 os.environ.setdefault("SHADOW_EXITS_FILE", "logs/live_shadow_exits.csv")
 

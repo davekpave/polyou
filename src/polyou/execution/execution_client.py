@@ -489,6 +489,14 @@ class ExecutionClient:
                 if inner_ex: err_msg += " " + str(inner_ex)
                 
             logger.error("Execution failed | %s - %s", order_id, err_msg)
+            try:
+                send_telegram_message(
+                    f"\u274c ORDER FAILED | {contract_slug}\n"
+                    f"side={side} price={price:.3f}\n"
+                    f"{err_msg[:120]}"
+                )
+            except Exception:
+                pass
             return None
 
     async def close_position(self, token_id: str, sell_price: float) -> bool:
