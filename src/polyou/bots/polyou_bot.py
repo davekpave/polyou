@@ -132,6 +132,13 @@ class PolyouBot:
         self.copy_only_down: bool = os.getenv(
             "COPY_ONLY_DOWN", "false"
         ).lower() == "true"
+        # Minimum entry price filter: signals below this lose money (~19% win rate)
+        self.min_entry_price: float = _env_float("COPY_MIN_PRICE", 0.0)
+        # UTC hours to skip: validated dead zones (00=8pmET, 10=6amET, 17=1pmET)
+        _skip_hours_env = os.getenv("COPY_SKIP_UTC_HOURS", "")
+        self.skip_utc_hours: set[int] = {
+            int(h.strip()) for h in _skip_hours_env.split(",") if h.strip().isdigit()
+        }
         # Runtime whitelist override (comma-separated addresses)
         env_whitelist = os.getenv("COPY_WHITELIST", "")
         self._runtime_whitelist: set[str] = {
@@ -315,6 +322,17 @@ class PolyouBot:
         if price <= 0.0 or price > self.max_entry_price:
             self.n_skipped += 1
             return
+
+        if self.min_entry_price > 0.0 and price < self.min_entry_price:
+            self.n_skipped += 1
+            return
+
+        if self.skip_utc_hours:
+            import datetime
+            current_utc_hour = datetime.datetime.utcnow().hour
+            if current_utc_hour in self.skip_utc_hours:
+                self.n_skipped += 1
+                return
 
         outcome = str(trade.get("outcome") or "").upper()
         # Polymarket up-down markets: outcome is "Up"/"Down" → side label.
