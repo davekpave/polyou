@@ -30,7 +30,7 @@ if "0.01" in ROUNDING_CONFIG:
     ROUNDING_CONFIG["0.01"] = RoundConfig(
         price=2,
         size=2,
-        amount=4
+        amount=2  # USDC maker amount max 2 decimals (cents precision)
     )
 
 logger = logging.getLogger("execution_client")
