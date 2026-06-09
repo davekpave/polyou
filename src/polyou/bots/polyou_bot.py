@@ -24,6 +24,7 @@ from typing import Any, Dict, Iterable, Optional, Set, Tuple
 import httpx
 
 from polyou.execution.shadow_book import ShadowPositionBook
+from polyou.utils.telegram_notifier import send_telegram_message
 
 logger = logging.getLogger("polyou_bot")
 
@@ -355,6 +356,15 @@ class PolyouBot:
             "COPY | leader=%s sym=%s side=%s slug=%s px=%.4f tte=%ds tx=%s",
             leader[:10], symbol, side_label, slug, price, tte, tx[:10],
         )
+        try:
+            send_telegram_message(
+                f"📋 COPY | {symbol} {side_label}\n"
+                f"price={price:.3f} tte={tte}s\n"
+                f"leader={leader[:10]}\n"
+                f"slug={slug}"
+            )
+        except Exception:
+            logger.exception("Telegram COPY notification failed")
 
         # Live execution: place real order if execution client is available.
         # Position size set to minimum ($1 USDC notional) via COPY_TRADE_SIZE env var.

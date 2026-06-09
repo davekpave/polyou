@@ -3,6 +3,8 @@ import json
 import os
 from typing import Dict, Any, Optional
 
+from polyou.utils.telegram_notifier import send_telegram_message
+
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 def is_retriable_order_error(e: Exception) -> bool:
@@ -467,6 +469,15 @@ class ExecutionClient:
                 price * actual_filled_size,
                 status,
             )
+            try:
+                send_telegram_message(
+                    f"✅ EXECUTED | {contract_slug}\n"
+                    f"side={side} price={price:.3f}\n"
+                    f"size={actual_filled_size:.2f} notional=${price * actual_filled_size:.2f}\n"
+                    f"status={status}"
+                )
+            except Exception:
+                logger.exception("Telegram EXECUTED notification failed")
 
             return response
 
