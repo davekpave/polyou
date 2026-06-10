@@ -30,6 +30,7 @@ from pathlib import Path
 # Config (all overridable via env)
 # ------------------------------------------------------------------
 SHADOW_FILE     = os.getenv("REBAL_SHADOW_FILE",  "/root/polyou/logs/paper_shadow_exits.csv")
+SHADOW_FILE_AUX = os.getenv("REBAL_SHADOW_FILE_AUX", "/root/polyou/logs/live_shadow_exits.csv")
 ENV_FILE        = os.getenv("REBAL_ENV_FILE",      "/root/polyou/.env")
 OOS_FILE        = os.getenv("REBAL_OOS_FILE",      "/root/polyou/logs/oos_top_traders.csv")
 SERVICE_NAME    = os.getenv("REBAL_SERVICE",       "polyou-bot")
@@ -151,6 +152,15 @@ def main() -> None:
     cutoff = (today - timedelta(days=MAX_INACTIVE_D)).isoformat()
 
     by_leader = _read_shadow(SHADOW_FILE)
+    # Merge auxiliary shadow file (e.g. live_shadow_exits.csv) so historical
+    # data from before the paper bot started is included in scoring.
+    if SHADOW_FILE_AUX and SHADOW_FILE_AUX != SHADOW_FILE:
+        aux = _read_shadow(SHADOW_FILE_AUX)
+        for addr, trades in aux.items():
+            by_leader[addr].extend(trades)
+        # Re-sort each leader's trades by date after merging
+        for addr in by_leader:
+            by_leader[addr].sort(key=lambda t: t["date"])
     _log(f"Shadow file: {len(by_leader)} leaders tracked")
 
     current_wl = _read_current_whitelist(ENV_FILE)
@@ -179,6 +189,10 @@ def main() -> None:
             new_wl.append(addr)
 
     _log(f"New whitelist ({len(new_wl)}): {new_wl}")
+
+    if not new_wl:
+        _log("WARNING: No leaders qualified — keeping current whitelist unchanged")
+        return
 
     if sorted(new_wl) == sorted(current_wl):
         _log("No change needed — skipping restart")
