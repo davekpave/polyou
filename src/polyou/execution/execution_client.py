@@ -345,10 +345,10 @@ class ExecutionClient:
         # FAK fills at the RESTING ask price (not our limit), so a higher limit
         # doesn't increase fill cost — it only ensures we cross the spread through
         # any micro-movements during the 3-8 seconds between snapshot and submission.
-        # `price` already includes a 2¢ buffer from the bot snapshot. Add another 8¢
-        # here to reliably cross even if the book moved up. The 0.85 ceiling keeps
+        # `price` already includes a 2¢ buffer from the bot snapshot. Add another 4¢
+        # here to reliably cross even if the book moved slightly. The 0.85 ceiling keeps
         # breakeven W/R at 85% for high-priced entries.
-        guaranteed_buy_price = round(price + 0.08, 2)
+        guaranteed_buy_price = round(price + 0.04, 2)
 
         # Never allow an entry above 0.85
         guaranteed_buy_price = min(0.85, guaranteed_buy_price)
