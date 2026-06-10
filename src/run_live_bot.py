@@ -14,6 +14,7 @@ Launch example:
     .\.venv\Scripts\python.exe src\run_live_bot.py
 """
 
+import argparse
 import asyncio
 import logging
 import os
@@ -24,7 +25,11 @@ import httpx
 import json as _json
 
 from dotenv import load_dotenv
-load_dotenv()
+
+_parser = argparse.ArgumentParser(add_help=False)
+_parser.add_argument("--env-file", default=".env")
+_args, _ = _parser.parse_known_args()
+load_dotenv(_args.env_file, override=True)
 
 import sys
 sys.stdout.reconfigure(line_buffering=True)
@@ -32,6 +37,7 @@ sys.stderr.reconfigure(line_buffering=True)
 
 # Force separate log files before any imports that read env
 os.environ.setdefault("SHADOW_EXITS_FILE", "logs/live_shadow_exits.csv")
+_LOG_FILE = os.getenv("BOT_LOG_FILE", "logs/live_bot.log")
 
 from polyou.bots.polyou_bot import PolyouBot
 import polyou.bots.polyou_bot as polyou_bot_module
@@ -109,7 +115,7 @@ os.makedirs("logs", exist_ok=True)
 handler = logging.StreamHandler()
 handler.setFormatter(ETFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
 
-file_handler = logging.FileHandler("logs/live_bot.log", encoding="utf-8")
+file_handler = logging.FileHandler(_LOG_FILE, encoding="utf-8")
 file_handler.setFormatter(ETFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
 
 root = logging.getLogger()
