@@ -211,8 +211,9 @@ async def main_async():
 # Separate lock file from paper bot
 # --------------------------------------------------
 
-_LIVE_LOCK_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "polyou_live_bot.lock"
+_LIVE_LOCK_PATH = os.getenv(
+    "BOT_LOCK_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "polyou_live_bot.lock")
 )
 _live_lock_handle = None
 
