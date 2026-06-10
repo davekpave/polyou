@@ -603,3 +603,7 @@ class ExecutionClient:
                 self.active_positions.pop(token_id, None)
                 self._persist_state()
             return False
+
+    async def sell_position(self, *, token_id: str, price: float) -> bool:
+        """Mirror a leader's early exit — alias for close_position."""
+        return await self.close_position(token_id, price)

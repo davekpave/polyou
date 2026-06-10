@@ -394,6 +394,10 @@ class ShadowPositionBook:
             # Stop-loss exits before expiry; can't determine predicted outcome
             predicted_side_won = ""
             inverse_pnl_naive = None
+        elif exit_type == "LEADER_EXIT":
+            # Leader sold early — outcome unknown until window resolves
+            predicted_side_won = ""
+            inverse_pnl_naive = None
         else:
             predicted_side_won = ""
             inverse_pnl_naive = None
@@ -457,3 +461,38 @@ class ShadowPositionBook:
         )
         self.positions.pop(token_id, None)
         self._persist_state()
+
+    def settle_leader_exit(
+        self,
+        *,
+        leader_address: str,
+        token_id: str,
+        exit_price: float,
+    ) -> Optional[str]:
+        """Close a shadow position because the leader sold early.
+
+        Returns the position_id that was closed, or None if no matching
+        open position was found.
+        """
+        token_id = str(token_id)
+        pos = self.positions.get(token_id)
+        if pos is None:
+            return None
+        if pos.get("leader_address", "").lower() != leader_address.lower():
+            return None
+        now = time.time()
+        ts_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        book = self._book(token_id)
+        self._close(
+            pos,
+            exit_price=exit_price,
+            exit_type="LEADER_EXIT",
+            book=book,
+            now=now,
+            ts_iso=ts_iso,
+        )
+        logger.info(
+            "Leader exit mirrored | sym=%s token=%s exit=%.4f",
+            pos["symbol"], token_id, exit_price,
+        )
+        return pos["position_id"]

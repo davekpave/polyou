@@ -311,6 +311,46 @@ class PolyouBot:
             return
 
         side_raw = str(trade.get("side") or "").upper()
+
+        # Mirror leader early exits: if the leader is selling a token we hold,
+        # close our shadow position (and live position if execution enabled).
+        if side_raw == "SELL":
+            token_id = str(trade.get("asset") or "")
+            if token_id:
+                try:
+                    exit_price = float(trade.get("price") or 0.0)
+                except (TypeError, ValueError):
+                    exit_price = 0.0
+                if exit_price > 0.0:
+                    closed_id = self.shadow_book.settle_leader_exit(
+                        leader_address=leader,
+                        token_id=token_id,
+                        exit_price=exit_price,
+                    )
+                    if closed_id is not None:
+                        logger.info(
+                            "LEADER_EXIT | leader=%s token=%s exit_px=%.4f tx=%s",
+                            leader[:10], token_id[:10], exit_price, tx[:10],
+                        )
+                        if not self.read_only and self.execution_client is not None:
+                            asyncio.create_task(
+                                self.execution_client.sell_position(
+                                    token_id=token_id,
+                                    price=exit_price,
+                                ),
+                                name=f"sell_{token_id[:10]}",
+                            )
+                        if not self.read_only:
+                            try:
+                                send_telegram_message(
+                                    f"🚪 LEADER EXIT | token={token_id[:10]}\n"
+                                    f"exit_price={exit_price:.3f}\n"
+                                    f"leader={leader[:10]}"
+                                )
+                            except Exception:
+                                pass
+            return  # Never treat a SELL as a new entry
+
         if self.copy_only_buys and side_raw != "BUY":
             self.n_skipped += 1
             return
