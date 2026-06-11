@@ -394,11 +394,19 @@ class PolyouBot:
             self.n_skipped += 1
             return
 
+        # For live orders, record the actual fill price (snapshot + entry buffer)
+        # so shadow EV accurately reflects real cost. Paper mode uses snapshot as-is.
+        _ENTRY_BUFFER = 0.02  # must match execution_client.py guaranteed_buy_price
+        live_entry_price = (
+            min(0.85, round(price + _ENTRY_BUFFER, 2))
+            if not self.read_only else None
+        )
         position_id = self.shadow_book.open(
             token_id=token_id,
             symbol=symbol,
             side=side_label,
             snapshot_price=price,
+            entry_price=live_entry_price,
             window_end_ts=window_end,
             leader_address=leader,
             contract_slug=slug,

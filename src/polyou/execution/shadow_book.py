@@ -247,16 +247,20 @@ class ShadowPositionBook:
         signal_priority: float | None = None,
         contract_slug: str = "",
         window_seconds: int = 15 * 60,
+        entry_price: float | None = None,
     ) -> Optional[str]:
-        """Open a synthetic position. Returns position_id, or None if duplicate."""
+        """Open a synthetic position. Returns position_id, or None if duplicate.
+
+        entry_price: actual fill price (e.g. snapshot + buffer for live orders).
+            Defaults to snapshot_price. Used for accurate EV tracking.
+        """
         if not token_id or snapshot_price is None:
             return None
         token_id = str(token_id)
         if token_id in self.positions:
             return None  # already shadowing this token
         now = time.time()
-        # Entry assumed = snapshot_price (the bot's stated intent). If the live
-        # ask drifted higher, we still record snapshot to compare slippage at exit.
+        actual_entry = float(entry_price) if entry_price is not None else float(snapshot_price)
         position_id = f"{token_id}-{int(now)}"
         # Snapshot chainlink price at window_start so we have the correct
         # reference even if the replay buffer rotates it out before close.
@@ -271,7 +275,7 @@ class ShadowPositionBook:
             "token_id": token_id,
             "symbol": symbol,
             "side": side,
-            "entry_price": float(snapshot_price),
+            "entry_price": actual_entry,
             "snapshot_price": float(snapshot_price),
             "entry_ts": now,
             "window_end_ts": window_end_int,
