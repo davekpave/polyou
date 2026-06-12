@@ -77,7 +77,7 @@ def _read_shadow(path: str) -> dict[str, list[dict]]:
                 try:
                     ep = float(row["entry_price"])
                     h = int(row["ts_iso"][11:13])
-                    if ep < MIN_PRICE or h in SKIP_HOURS:
+                    if ep < MIN_PRICE:
                         continue
                     addr = row["leader_address"].strip().lower()
                     trade_date = row["ts_iso"][:10]
