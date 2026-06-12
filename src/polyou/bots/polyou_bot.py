@@ -139,6 +139,17 @@ class PolyouBot:
         self.skip_utc_hours: set[int] = {
             int(h.strip()) for h in _skip_hours_env.split(",") if h.strip().isdigit()
         }
+        # Per-leader skip hours written by the rebalancer (overrides global skip_utc_hours)
+        self.leader_skip_hours: dict[str, set[int]] = {}
+        _skip_file = os.getenv("LEADER_SKIP_HOURS_FILE", "logs/leader_skip_hours.json")
+        try:
+            import json as _json
+            if os.path.exists(_skip_file):
+                _raw = _json.loads(open(_skip_file, encoding="utf-8").read())
+                self.leader_skip_hours = {a.lower(): set(hs) for a, hs in _raw.items()}
+                logger.info("Loaded per-leader skip hours for %d leaders", len(self.leader_skip_hours))
+        except Exception:
+            logger.warning("Could not load leader skip hours from %s", _skip_file)
         # Runtime whitelist override (comma-separated addresses)
         env_whitelist = os.getenv("COPY_WHITELIST", "")
         self._runtime_whitelist: set[str] = {
@@ -367,12 +378,12 @@ class PolyouBot:
             self.n_skipped += 1
             return
 
-        if self.skip_utc_hours:
-            import datetime
-            current_utc_hour = datetime.datetime.utcnow().hour
-            if current_utc_hour in self.skip_utc_hours:
-                self.n_skipped += 1
-                return
+        import datetime
+        current_utc_hour = datetime.datetime.utcnow().hour
+        _leader_skip = self.leader_skip_hours.get(leader) or self.skip_utc_hours
+        if _leader_skip and current_utc_hour in _leader_skip:
+            self.n_skipped += 1
+            return
 
         outcome = str(trade.get("outcome") or "").upper()
         # Polymarket up-down markets: outcome is "Up"/"Down" → side label.

@@ -43,8 +43,10 @@ MAX_WHITELIST   = int(os.getenv("REBAL_MAX_WHITELIST",     "3"))
 DEMOTION_EV     = float(os.getenv("REBAL_DEMOTION_EV",   "0.0"))
 PROMOTION_EV    = float(os.getenv("REBAL_PROMOTION_EV",  "0.05"))
 
-# Must match bot's filter settings
-SKIP_HOURS: set[int] = set()  # No hour filtering — trust the leader's timing
+# Per-leader skip hours: hours where a leader has >=N trades with EV below threshold
+LEADER_SKIP_HOURS_FILE  = os.getenv("REBAL_SKIP_HOURS_FILE", "/root/polyou/logs/leader_skip_hours.json")
+SKIP_HOUR_MIN_N         = int(os.getenv("REBAL_SKIP_HOUR_MIN_N", "3"))
+SKIP_HOUR_EV_THRESHOLD  = float(os.getenv("REBAL_SKIP_HOUR_EV_THRESHOLD", "-0.05"))
 MIN_PRICE: float = 0.30
 
 
@@ -80,7 +82,7 @@ def _read_shadow(path: str) -> dict[str, list[dict]]:
                     addr = row["leader_address"].strip().lower()
                     trade_date = row["ts_iso"][:10]
                     pnl = float(row["true_pnl"])
-                    by_leader[addr].append({"date": trade_date, "pnl": pnl})
+                    by_leader[addr].append({"date": trade_date, "pnl": pnl, "hour": h})
                 except (ValueError, KeyError):
                     continue
     except FileNotFoundError:
@@ -92,6 +94,36 @@ def _score(trades: list[dict]) -> float:
     """Mean PnL of the last ROLLING_N trades."""
     window = trades[-ROLLING_N:]
     return sum(t["pnl"] for t in window) / len(window)
+
+
+def _compute_leader_skip_hours(
+    by_leader: dict[str, list[dict]],
+) -> dict[str, list[int]]:
+    """Return {addr: [bad_utc_hours]} derived from unfiltered paper trades.
+
+    A UTC hour is marked bad for a leader when they have >= SKIP_HOUR_MIN_N
+    settled trades in that hour and the mean PnL is below SKIP_HOUR_EV_THRESHOLD.
+    """
+    result: dict[str, list[int]] = {}
+    for addr, trades in by_leader.items():
+        hour_pnls: dict[int, list[float]] = defaultdict(list)
+        for t in trades:
+            h = t.get("hour")
+            if h is not None:
+                hour_pnls[h].append(t["pnl"])
+        bad = [
+            h for h, pnls in hour_pnls.items()
+            if len(pnls) >= SKIP_HOUR_MIN_N
+            and sum(pnls) / len(pnls) < SKIP_HOUR_EV_THRESHOLD
+        ]
+        result[addr] = sorted(bad)
+    return result
+
+
+def _write_skip_hours(skip_hours: dict[str, list[int]], path: str) -> None:
+    import json as _json
+    with open(path, "w", encoding="utf-8") as f:
+        _json.dump(skip_hours, f, indent=2)
 
 
 def _read_current_whitelist(env_path: str) -> list[str]:
@@ -162,6 +194,18 @@ def main() -> None:
         for addr in by_leader:
             by_leader[addr].sort(key=lambda t: t["date"])
     _log(f"Shadow file: {len(by_leader)} leaders tracked")
+
+    # Compute per-leader skip hours from raw data and write JSON for the live bot
+    leader_skip = _compute_leader_skip_hours(by_leader)
+    _write_skip_hours(leader_skip, LEADER_SKIP_HOURS_FILE)
+    total_bad = sum(len(v) for v in leader_skip.values())
+    _log(f"Wrote per-leader skip hours: {total_bad} bad hours across {len(leader_skip)} leaders → {LEADER_SKIP_HOURS_FILE}")
+
+    # Filter each leader's trades using their own skip hours before scoring
+    for addr in list(by_leader.keys()):
+        skip = set(leader_skip.get(addr, []))
+        if skip:
+            by_leader[addr] = [t for t in by_leader[addr] if t.get("hour") not in skip]
 
     current_wl = _read_current_whitelist(ENV_FILE)
     _log(f"Current whitelist: {current_wl}")
