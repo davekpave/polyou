@@ -221,8 +221,8 @@ class ExecutionClient:
             # caused by book movement between signal snapshot and submission.
             live_ask = await self._fetch_live_ask(payload["market"])
             if live_ask is not None:
-                # +5¢ to cross the spread reliably
-                refreshed_price = round(live_ask + 0.05, 2)
+                # +5¢ to cross the spread reliably; cap at 0.99 (API maximum)
+                refreshed_price = min(0.99, round(live_ask + 0.05, 2))
                 if abs(refreshed_price - payload["price"]) >= 0.01:
                     logger.info(
                         "Refreshed entry price | snapshot=%.2f live_ask=%.2f new_limit=%.2f",
@@ -335,8 +335,8 @@ class ExecutionClient:
         # doesn't increase fill cost — it only ensures we cross the spread through
         # any micro-movements during the 3-8 seconds between snapshot and submission.
         # `price` already includes a 2¢ buffer from the bot snapshot. Add another 2¢
-        # here to reliably cross even if the book moved slightly.
-        guaranteed_buy_price = round(price + 0.02, 2)
+        # here to reliably cross even if the book moved slightly. Cap at 0.99 (API max).
+        guaranteed_buy_price = min(0.99, round(price + 0.02, 2))
         
         # Truncate strictly DOWN to 2 decimal places to comply with API 
         computed_size = int((effective_notional / guaranteed_buy_price) * 100) / 100.0
