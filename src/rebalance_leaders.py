@@ -44,7 +44,7 @@ DEMOTION_EV     = float(os.getenv("REBAL_DEMOTION_EV",   "0.0"))
 PROMOTION_EV    = float(os.getenv("REBAL_PROMOTION_EV",  "0.05"))
 
 # Must match bot's filter settings
-SKIP_HOURS: set[int] = {0, 10, 17}
+SKIP_HOURS: set[int] = set()  # No hour filtering — trust the leader's timing
 MIN_PRICE: float = 0.30
 
 
