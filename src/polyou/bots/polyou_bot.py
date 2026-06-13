@@ -405,32 +405,35 @@ class PolyouBot:
             self.n_skipped += 1
             return
 
-        # Max 1 open position per leader: wait for previous trade to settle first.
-        open_for_leader = [
-            p for p in self.shadow_book.positions.values()
-            if p.get("leader_address", "").lower() == leader.lower()
-        ]
-        if open_for_leader:
-            self.n_skipped += 1
-            logger.debug(
-                "SKIP (leader busy) | leader=%s already has %d open position(s)",
-                leader[:10], len(open_for_leader),
-            )
-            return
+        # Live-only guards: paper mode tracks every leader signal independently
+        # so the rebalancer gets unbiased stats for all 100 leaders.
+        if not self.read_only:
+            # Max 1 open position per leader: wait for previous trade to settle first.
+            open_for_leader = [
+                p for p in self.shadow_book.positions.values()
+                if p.get("leader_address", "").lower() == leader.lower()
+            ]
+            if open_for_leader:
+                self.n_skipped += 1
+                logger.debug(
+                    "SKIP (leader busy) | leader=%s already has %d open position(s)",
+                    leader[:10], len(open_for_leader),
+                )
+                return
 
-        # Max 1 open position per window: correlated markets in the same expiry
-        # window move together, so a second entry adds exposure without new edge.
-        open_in_window = [
-            p for p in self.shadow_book.positions.values()
-            if p.get("window_end_ts") == window_end
-        ]
-        if open_in_window:
-            self.n_skipped += 1
-            logger.debug(
-                "SKIP (window busy) | window_end=%d already has %d open position(s)",
-                window_end, len(open_in_window),
-            )
-            return
+            # Max 1 open position per window: correlated markets in the same expiry
+            # window move together, so a second entry adds exposure without new edge.
+            open_in_window = [
+                p for p in self.shadow_book.positions.values()
+                if p.get("window_end_ts") == window_end
+            ]
+            if open_in_window:
+                self.n_skipped += 1
+                logger.debug(
+                    "SKIP (window busy) | window_end=%d already has %d open position(s)",
+                    window_end, len(open_in_window),
+                )
+                return
 
         # For live orders, record the actual fill price (snapshot + entry buffer)
         # so shadow EV accurately reflects real cost. Paper mode uses snapshot as-is.
