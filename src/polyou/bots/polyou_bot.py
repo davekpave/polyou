@@ -405,6 +405,19 @@ class PolyouBot:
             self.n_skipped += 1
             return
 
+        # Max 1 open position per leader: wait for previous trade to settle first.
+        open_for_leader = [
+            p for p in self.shadow_book.positions.values()
+            if p.get("leader_address", "").lower() == leader.lower()
+        ]
+        if open_for_leader:
+            self.n_skipped += 1
+            logger.debug(
+                "SKIP (leader busy) | leader=%s already has %d open position(s)",
+                leader[:10], len(open_for_leader),
+            )
+            return
+
         # For live orders, record the actual fill price (snapshot + entry buffer)
         # so shadow EV accurately reflects real cost. Paper mode uses snapshot as-is.
         _ENTRY_BUFFER = 0.02  # must match execution_client.py guaranteed_buy_price
