@@ -221,8 +221,8 @@ class ExecutionClient:
             # caused by book movement between signal snapshot and submission.
             live_ask = await self._fetch_live_ask(payload["market"])
             if live_ask is not None:
-                # +5¢ to cross the spread reliably; cap at 0.99 (API maximum)
-                refreshed_price = min(0.99, round(live_ask + 0.05, 2))
+                # +2¢ to cross the spread reliably; cap at 0.99 (API maximum)
+                refreshed_price = min(0.99, round(live_ask + 0.02, 2))
                 if abs(refreshed_price - payload["price"]) >= 0.01:
                     logger.info(
                         "Refreshed entry price | snapshot=%.2f live_ask=%.2f new_limit=%.2f",
