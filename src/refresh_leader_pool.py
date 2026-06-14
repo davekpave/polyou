@@ -127,53 +127,65 @@ def _get_json(client: httpx.Client, url: str, params: dict, retries: int = 5) ->
 # ---------------------------------------------------------------------------
 def fetch_recent_markets(client: httpx.Client) -> list[dict]:
     """Return list of {conditionId, winner_token} for resolved 15m markets
-    in the last LOOKBACK_DAYS days."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
+    in the last LOOKBACK_DAYS days.
+
+    Queries one day at a time (matching discover_15m_markets.py approach) so
+    the Gamma API's date filters work precisely and updown markets aren't
+    crowded out by the 500-result page limit.
+    """
+    end = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = end - timedelta(days=LOOKBACK_DAYS)
     markets: list[dict] = []
-    offset = 0
 
-    while True:
-        params = {
-            "closed": "true",
-            "limit": 500,
-            "offset": offset,
-            "end_date_min": cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
-        batch = _get_json(client, GAMMA_API, params)
-        if not batch or not isinstance(batch, list):
-            break
+    day = start
+    while day < end:
+        day_end = day + timedelta(days=1)
+        offset = 0
+        while True:
+            params = {
+                "closed": "true",
+                "limit": 500,
+                "offset": offset,
+                "end_date_min": day.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end_date_max": day_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            batch = _get_json(client, GAMMA_API, params)
+            if not batch or not isinstance(batch, list):
+                break
 
-        for m in batch:
-            slug = m.get("slug", "")
-            if not SLUG_RE.match(slug):
-                continue
+            for m in batch:
+                slug = m.get("slug", "")
+                if not SLUG_RE.match(slug):
+                    continue
 
-            cond = m.get("conditionId", "")
-            if not cond:
-                continue
+                cond = m.get("conditionId", "")
+                if not cond:
+                    continue
 
-            # Determine winner token from final settlement prices
-            try:
-                tokens = json.loads(m.get("clobTokenIds") or "[]")
-                prices = [float(x) for x in json.loads(m.get("outcomePrices") or "[]")]
-            except Exception:
-                continue
+                try:
+                    tokens = json.loads(m.get("clobTokenIds") or "[]")
+                    prices = [float(x) for x in json.loads(m.get("outcomePrices") or "[]")]
+                except Exception:
+                    continue
 
-            if len(tokens) != 2 or len(prices) != 2:
-                continue
+                if len(tokens) != 2 or len(prices) != 2:
+                    continue
 
-            if prices[0] >= 0.99 and prices[1] <= 0.01:
-                winner_token = tokens[0]
-            elif prices[1] >= 0.99 and prices[0] <= 0.01:
-                winner_token = tokens[1]
-            else:
-                continue  # market not cleanly resolved
+                if prices[0] >= 0.99 and prices[1] <= 0.01:
+                    winner_token = tokens[0]
+                elif prices[1] >= 0.99 and prices[0] <= 0.01:
+                    winner_token = tokens[1]
+                else:
+                    continue  # market not cleanly resolved
 
-            markets.append({"condition_id": cond, "winner_token": winner_token})
+                markets.append({"condition_id": cond, "winner_token": winner_token})
 
-        if len(batch) < 500:
-            break
-        offset += 500
+            if len(batch) < 500:
+                break
+            offset += 500
+            time.sleep(0.1)
+
+        day += timedelta(days=1)
         time.sleep(0.1)
 
     logger.info("Found %d resolved 15m markets in last %d days", len(markets), LOOKBACK_DAYS)
