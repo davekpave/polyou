@@ -132,7 +132,7 @@ def _get_json(client: httpx.Client, url: str, params: dict, retries: int = 5) ->
 # ---------------------------------------------------------------------------
 # Market discovery via data-api (no Gamma dependency)
 # ---------------------------------------------------------------------------
-def _seed_addresses(n: int = 10) -> list[str]:
+def _seed_addresses(n: int = 20) -> list[str]:
     """Return up to n addresses from the existing pool to use as market seeds."""
     addrs: list[str] = []
     if not OOS_FILE.exists():
@@ -145,25 +145,20 @@ def _seed_addresses(n: int = 10) -> list[str]:
     return addrs
 
 
-def fetch_recent_markets(client: httpx.Client) -> list[dict]:
-    """Discover recent 15m conditionIds by sampling our known leaders' trades.
+def fetch_recent_condition_ids(client: httpx.Client) -> list[str]:
+    """Discover recent 15m conditionIds by sampling seed leaders' recent trades.
 
-    Uses data-api.polymarket.com/trades?user=<addr> — each trade includes the
-    conditionId, so we don't need the Gamma API at all.  Returns a list of
-    {condition_id, winner_token} dicts, where winner_token is inferred from the
-    CLOB market resolution prices.
+    Each data-api trade record includes conditionId, so no Gamma API needed.
     """
     cutoff_ts = int(time.time()) - LOOKBACK_DAYS * 86400
-    seed_addrs = _seed_addresses(n=20)
+    seed_addrs = _seed_addresses()
     if not seed_addrs:
         logger.warning("No seed addresses found in pool file")
         return []
 
-    # Collect unique conditionIds from seed leaders' recent 15m trades
-    condition_ids: dict[str, str] = {}  # conditionId → slug
+    condition_ids: dict[str, None] = {}
     for addr in seed_addrs:
-        data = _get_json(client, DATA_API,
-                         {"user": addr, "limit": 50})
+        data = _get_json(client, DATA_API, {"user": addr, "limit": 50})
         if not data or not isinstance(data, list):
             continue
         for t in data:
@@ -174,52 +169,12 @@ def fetch_recent_markets(client: httpx.Client) -> list[dict]:
             if not SLUG_RE.match(slug):
                 continue
             cid = str(t.get("conditionId") or "")
-            if cid and cid not in condition_ids:
-                condition_ids[cid] = slug
+            if cid:
+                condition_ids[cid] = None
         time.sleep(0.05)
 
     logger.info("Discovered %d unique 15m conditionIds from seed leaders", len(condition_ids))
-    if not condition_ids:
-        return []
-
-    # For each conditionId, determine the winner token via CLOB resolved prices
-    markets: list[dict] = []
-    for cid, slug in condition_ids.items():
-        # Extract window_end from slug to determine winner (UP token = lower index → index 0)
-        # We resolve winner by checking which token settled near 1.0 via a
-        # CLOB markets lookup.
-        clob_data = _get_json(
-            client,
-            "https://clob.polymarket.com/markets",
-            {"condition_id": cid},
-        )
-        if not clob_data:
-            continue
-        results = clob_data if isinstance(clob_data, list) else clob_data.get("data") or []
-        if not results:
-            continue
-        m = results[0]
-        tokens = m.get("tokens") or []
-        if len(tokens) != 2:
-            continue
-        # Token with outcome_price closest to 1.0 won
-        try:
-            prices = [float(t.get("outcome_price") or 0) for t in tokens]
-        except Exception:
-            continue
-        if prices[0] >= 0.99 and prices[1] <= 0.01:
-            winner_token = str(tokens[0].get("token_id", ""))
-        elif prices[1] >= 0.99 and prices[0] <= 0.01:
-            winner_token = str(tokens[1].get("token_id", ""))
-        else:
-            continue  # not cleanly resolved
-
-        if winner_token:
-            markets.append({"condition_id": cid, "winner_token": winner_token})
-        time.sleep(0.05)
-
-    logger.info("Resolved winner for %d / %d markets", len(markets), len(condition_ids))
-    return markets
+    return list(condition_ids.keys())
 
 
 # ---------------------------------------------------------------------------
@@ -228,19 +183,38 @@ def fetch_recent_markets(client: httpx.Client) -> list[dict]:
 def score_market_traders(
     client: httpx.Client,
     condition_id: str,
-    winner_token: str,
     stats: dict,
 ) -> None:
-    """Fetch first page of trades for a market and accumulate per-trader stats."""
+    """Fetch all trades for a market, infer the winner token, and score buyers.
+
+    Winner inference: a SELL at price >= 0.98 means the seller is liquidating
+    the winning token at face value after settlement.
+    """
     data = _get_json(client, DATA_API, {"market": condition_id, "limit": 500})
     if not data or not isinstance(data, list):
         return
 
+    # Infer winner token from high-price SELL trades
+    winner_token: Optional[str] = None
     for t in data:
+        if str(t.get("side") or "").upper() == "SELL":
+            try:
+                p = float(t.get("price") or 0)
+            except (TypeError, ValueError):
+                continue
+            if p >= 0.98:
+                winner_token = str(t.get("asset") or "")
+                break
+
+    if not winner_token:
+        return  # Market not yet settled or no redemption trades visible
+
+    for t in data:
+        if str(t.get("side") or "").upper() != "BUY":
+            continue
         addr = (t.get("proxyWallet") or "").lower()
         if not addr or not addr.startswith("0x"):
             continue
-        side = (t.get("side") or "").upper()
         try:
             size  = float(t.get("size")  or 0)
             price = float(t.get("price") or 0)
@@ -249,7 +223,7 @@ def score_market_traders(
         if size <= 0 or price <= 0:
             continue
         asset = str(t.get("asset") or "")
-        pnl, cash = trade_pnl(side, asset, size, price, winner_token)
+        pnl, cash = trade_pnl("BUY", asset, size, price, winner_token)
         s = stats[addr]
         s["pnl"]  += pnl
         s["n"]    += 1
@@ -265,19 +239,19 @@ def main() -> None:
     logger.info("Existing pool: %d leaders", len(existing))
 
     with httpx.Client(timeout=30) as client:
-        markets = fetch_recent_markets(client)
-        if not markets:
-            logger.warning("No markets found; exiting")
+        condition_ids = fetch_recent_condition_ids(client)
+        if not condition_ids:
+            logger.warning("No condition IDs found; exiting")
             return
 
         stats: dict[str, dict] = defaultdict(lambda: {"pnl": 0.0, "n": 0, "cash": 0.0})
-        for i, mkt in enumerate(markets):
-            score_market_traders(client, mkt["condition_id"], mkt["winner_token"], stats)
-            if (i + 1) % 50 == 0:
-                logger.info("Processed %d / %d markets ...", i + 1, len(markets))
-            time.sleep(0.05)  # gentle rate limiting
+        for i, cid in enumerate(condition_ids):
+            score_market_traders(client, cid, stats)
+            if (i + 1) % 25 == 0:
+                logger.info("Processed %d / %d markets ...", i + 1, len(condition_ids))
+            time.sleep(0.05)
 
-    logger.info("Scored %d unique addresses across %d markets", len(stats), len(markets))
+    logger.info("Scored %d unique addresses across %d markets", len(stats), len(condition_ids))
 
     # Filter to new qualifying candidates
     candidates = []
