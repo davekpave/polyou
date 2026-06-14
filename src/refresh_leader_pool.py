@@ -28,7 +28,7 @@ import os
 import re
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -53,6 +53,10 @@ LOOKBACK_DAYS = int(os.getenv("REFRESH_LOOKBACK_DAYS", "30"))
 MIN_TRADES    = int(os.getenv("REFRESH_MIN_TRADES",    "20"))
 MIN_EV        = float(os.getenv("REFRESH_MIN_EV",      "0.05"))
 MAX_NEW       = int(os.getenv("REFRESH_MAX_NEW",        "20"))
+# Seed addresses used only to discover recent market conditionIds.
+# Any address that has traded 15m markets recently works.
+SEED_LEADERS_FILE = Path(os.getenv("REBAL_OOS_FILE",
+                                   "/root/polyou/logs/oos_top_traders.csv"))
 
 OOS_FIELDS = [
     "address", "train_pnl", "train_n", "train_vol",
@@ -125,70 +129,96 @@ def _get_json(client: httpx.Client, url: str, params: dict, retries: int = 5) ->
 # ---------------------------------------------------------------------------
 # Market discovery
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Market discovery via data-api (no Gamma dependency)
+# ---------------------------------------------------------------------------
+def _seed_addresses(n: int = 10) -> list[str]:
+    """Return up to n addresses from the existing pool to use as market seeds."""
+    addrs: list[str] = []
+    if not OOS_FILE.exists():
+        return addrs
+    with OOS_FILE.open(encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            addrs.append(row["address"])
+            if len(addrs) >= n:
+                break
+    return addrs
+
+
 def fetch_recent_markets(client: httpx.Client) -> list[dict]:
-    """Return list of {conditionId, winner_token} for resolved 15m markets
-    in the last LOOKBACK_DAYS days.
+    """Discover recent 15m conditionIds by sampling our known leaders' trades.
 
-    Queries one day at a time (matching discover_15m_markets.py approach) so
-    the Gamma API's date filters work precisely and updown markets aren't
-    crowded out by the 500-result page limit.
+    Uses data-api.polymarket.com/trades?user=<addr> — each trade includes the
+    conditionId, so we don't need the Gamma API at all.  Returns a list of
+    {condition_id, winner_token} dicts, where winner_token is inferred from the
+    CLOB market resolution prices.
     """
-    end = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    start = end - timedelta(days=LOOKBACK_DAYS)
+    cutoff_ts = int(time.time()) - LOOKBACK_DAYS * 86400
+    seed_addrs = _seed_addresses(n=20)
+    if not seed_addrs:
+        logger.warning("No seed addresses found in pool file")
+        return []
+
+    # Collect unique conditionIds from seed leaders' recent 15m trades
+    condition_ids: dict[str, str] = {}  # conditionId → slug
+    for addr in seed_addrs:
+        data = _get_json(client, DATA_API,
+                         {"user": addr, "limit": 50})
+        if not data or not isinstance(data, list):
+            continue
+        for t in data:
+            ts = int(t.get("timestamp") or 0)
+            if ts < cutoff_ts:
+                continue
+            slug = str(t.get("slug") or "")
+            if not SLUG_RE.match(slug):
+                continue
+            cid = str(t.get("conditionId") or "")
+            if cid and cid not in condition_ids:
+                condition_ids[cid] = slug
+        time.sleep(0.05)
+
+    logger.info("Discovered %d unique 15m conditionIds from seed leaders", len(condition_ids))
+    if not condition_ids:
+        return []
+
+    # For each conditionId, determine the winner token via CLOB resolved prices
     markets: list[dict] = []
+    for cid, slug in condition_ids.items():
+        # Extract window_end from slug to determine winner (UP token = lower index → index 0)
+        # We resolve winner by checking which token settled near 1.0 via a
+        # CLOB markets lookup.
+        clob_data = _get_json(
+            client,
+            "https://clob.polymarket.com/markets",
+            {"condition_id": cid},
+        )
+        if not clob_data:
+            continue
+        results = clob_data if isinstance(clob_data, list) else clob_data.get("data") or []
+        if not results:
+            continue
+        m = results[0]
+        tokens = m.get("tokens") or []
+        if len(tokens) != 2:
+            continue
+        # Token with outcome_price closest to 1.0 won
+        try:
+            prices = [float(t.get("outcome_price") or 0) for t in tokens]
+        except Exception:
+            continue
+        if prices[0] >= 0.99 and prices[1] <= 0.01:
+            winner_token = str(tokens[0].get("token_id", ""))
+        elif prices[1] >= 0.99 and prices[0] <= 0.01:
+            winner_token = str(tokens[1].get("token_id", ""))
+        else:
+            continue  # not cleanly resolved
 
-    day = start
-    while day < end:
-        day_end = day + timedelta(days=1)
-        offset = 0
-        while True:
-            params = {
-                "closed": "true",
-                "limit": 500,
-                "offset": offset,
-                "end_date_min": day.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "end_date_max": day_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            }
-            batch = _get_json(client, GAMMA_API, params)
-            if not batch or not isinstance(batch, list):
-                break
+        if winner_token:
+            markets.append({"condition_id": cid, "winner_token": winner_token})
+        time.sleep(0.05)
 
-            for m in batch:
-                slug = m.get("slug", "")
-                if not SLUG_RE.match(slug):
-                    continue
-
-                cond = m.get("conditionId", "")
-                if not cond:
-                    continue
-
-                try:
-                    tokens = json.loads(m.get("clobTokenIds") or "[]")
-                    prices = [float(x) for x in json.loads(m.get("outcomePrices") or "[]")]
-                except Exception:
-                    continue
-
-                if len(tokens) != 2 or len(prices) != 2:
-                    continue
-
-                if prices[0] >= 0.99 and prices[1] <= 0.01:
-                    winner_token = tokens[0]
-                elif prices[1] >= 0.99 and prices[0] <= 0.01:
-                    winner_token = tokens[1]
-                else:
-                    continue  # market not cleanly resolved
-
-                markets.append({"condition_id": cond, "winner_token": winner_token})
-
-            if len(batch) < 500:
-                break
-            offset += 500
-            time.sleep(0.1)
-
-        day += timedelta(days=1)
-        time.sleep(0.1)
-
-    logger.info("Found %d resolved 15m markets in last %d days", len(markets), LOOKBACK_DAYS)
+    logger.info("Resolved winner for %d / %d markets", len(markets), len(condition_ids))
     return markets
 
 
